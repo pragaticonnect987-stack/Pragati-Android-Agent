@@ -1,16 +1,17 @@
+
 name: Build Pragati APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -20,19 +21,23 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.10.2
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
 
-      - name: Extract Pragati Android project
+      - name: Extract Android project
         run: |
+          rm -rf project
           mkdir project
           unzip -q "Pragati Android_Agent_V2.zip" -d project
 
       - name: Build APK
-        working-directory: project
-        run: gradle :app:assembleDebug --no-daemon
+        run: |
+          cd project
+          gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
