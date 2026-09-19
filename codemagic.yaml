@@ -2,34 +2,68 @@ workflows:
   pragati-android:
     name: Pragati Android APK
     max_build_duration: 30
-    instance_type: linux_x2
+    instance_type: linux
 
     scripts:
       - name: Extract V4 Fixed project
         script: |
           set -e
+
           mkdir -p build_project
 
           ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*V4_Fixed*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "V4 Fixed ZIP not found"
+            echo "ERROR: V4 Fixed ZIP not found"
+            echo "Files available in repository:"
             ls -la
             exit 1
           fi
 
-          echo "Using: $ZIP_FILE"
+          echo "Using ZIP: $ZIP_FILE"
+
           unzip -q "$ZIP_FILE" -d build_project
+
+          echo "Project extracted successfully."
+
+          echo "Checking extracted files:"
+          find build_project -maxdepth 3 -type f | head -100
 
       - name: Set Android SDK
         script: |
+          set -e
+
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/build_project/local.properties"
 
-      - name: Build APK
+          echo "Android SDK configured."
+
+      - name: Check Gradle project
         script: |
           set -e
+
           cd build_project
+
+          echo "Checking Android project..."
+
+          if [ ! -f "app/build.gradle.kts" ]; then
+            echo "ERROR: app/build.gradle.kts not found"
+            find . -maxdepth 3 -type f
+            exit 1
+          fi
+
+          echo "app/build.gradle.kts found."
+
+      - name: Build Debug APK
+        script: |
+          set -e
+
+          cd build_project
+
+          echo "Starting Gradle build..."
+
           gradle :app:assembleDebug --no-daemon
+
+          echo "APK build completed."
 
     artifacts:
       - build_project/app/build/outputs/apk/debug/*.apk
