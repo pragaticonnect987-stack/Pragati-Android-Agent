@@ -1,69 +1,101 @@
-workflows:
-  pragati-android:
-    name: Pragati Android APK
-    max_build_duration: 30
-    instance_type: linux
+name: Build Pragati Android APK
 
-    scripts:
-      - name: Extract V4 Fixed project
-        script: |
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find and extract V4 Fixed project
+        shell: bash
+        run: |
           set -e
 
-          mkdir -p build_project
-
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*V4_Fixed*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*V4_Fixed*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: V4 Fixed ZIP not found"
-            echo "Files available in repository:"
-            ls -la
+            find . -maxdepth 2 -type f
             exit 1
           fi
 
           echo "Using ZIP: $ZIP_FILE"
 
+          mkdir -p build_project
           unzip -q "$ZIP_FILE" -d build_project
 
-          echo "Project extracted successfully."
-
-          echo "Checking extracted files:"
+          echo "Extracted files:"
           find build_project -maxdepth 3 -type f | head -100
 
-      - name: Set Android SDK
-        script: |
+      - name: Find Android project
+        shell: bash
+        run: |
           set -e
 
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/build_project/local.properties"
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/build_project" \
+            -name "settings.gradle.kts" \
+            -o -name "settings.gradle" | head -n 1 | xargs -r dirname)
 
-          echo "Android SDK configured."
-
-      - name: Check Gradle project
-        script: |
-          set -e
-
-          cd build_project
-
-          echo "Checking Android project..."
-
-          if [ ! -f "app/build.gradle.kts" ]; then
-            echo "ERROR: app/build.gradle.kts not found"
-            find . -maxdepth 3 -type f
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Android project not found"
+            find "$GITHUB_WORKSPACE/build_project" -maxdepth 4 -type f
             exit 1
           fi
 
-          echo "app/build.gradle.kts found."
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Android project: $PROJECT_DIR"
 
-      - name: Build Debug APK
-        script: |
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Install Gradle
+        shell: bash
+        run: |
           set -e
 
-          cd build_project
+          wget -q https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+          unzip -q gradle-8.10.2-bin.zip
+          echo "$GITHUB_WORKSPACE/gradle-8.10.2/bin" >> "$GITHUB_PATH"
 
-          echo "Starting Gradle build..."
+          gradle --version
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          echo "Building Pragati Android APK..."
 
           gradle :app:assembleDebug --no-daemon
 
           echo "APK build completed."
 
-    artifacts:
-      - build_project/app/build/outputs/apk/debug/*.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pragati-Android-APK
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
