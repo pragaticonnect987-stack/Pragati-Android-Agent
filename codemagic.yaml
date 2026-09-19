@@ -1,0 +1,29 @@
+workflows:
+  pragati-android:
+    name: Pragati Android APK
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+
+    scripts:
+      - name: Extract Pragati project
+        script: |
+          set -e
+          mkdir -p build_project
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*V3*.zip" | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "V3 ZIP not found"
+            exit 1
+          fi
+          unzip -q "$ZIP_FILE" -d build_project
+
+      - name: Set Android SDK
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/build_project/local.properties"
+
+      - name: Build APK
+        script: |
+          cd build_project
+          gradle :app:assembleDebug --no-daemon
+
+    artifacts:
+      - build_project/app/build/outputs/apk/debug/*.apk
