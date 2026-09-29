@@ -3,14 +3,12 @@ name: Build Pragati APK
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
-
-permissions:
-  contents: read
+    branches:
+      - main
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -20,44 +18,149 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.10.2"
+          gradle-version: '8.10.2'
 
       - name: Find and extract Pragati project
         shell: bash
         run: |
           set -e
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*V3*.zip" | head -n 1)
+
+          ZIP_FILE=$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -iname "*V4_Fixed*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: V3 ZIP file not found."
-            echo "Files in repository:"
-            ls -la
+            echo "V4_Fixed ZIP not found."
+            echo "Available ZIP files:"
+            find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -iname "*.zip"
             exit 1
           fi
 
-          echo "Using: $ZIP_FILE"
-          rm -rf project
-          mkdir project
-          unzip -q "$ZIP_FILE" -d project
+          echo "Using ZIP:"
+          echo "$ZIP_FILE"
 
-          echo "Extracted project:"
-          find project -maxdepth 3 -type f | sort
+          mkdir -p "$GITHUB_WORKSPACE/build_project"
 
-      - name: Build APK
+          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/build_project"
+
+          echo "Project files:"
+          find "$GITHUB_WORKSPACE/build_project" -maxdepth 3 -type f | head -100
+
+      - name: Find Android project
         shell: bash
         run: |
           set -e
-          cd project
-          gradle :app:assembleDebug --no-daemon --stacktrace
+
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/build_project" \
+            -type f \( -name "settings.gradle.kts" -o -name "settings.gradle" \) \
+            -print -quit | xargs dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Android project not found."
+            find "$GITHUB_WORKSPACE/build_project" -maxdepth 5 -type f
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Android project:"
+          echo "$PROJECT_DIR"
+
+      - name: Fix Java and Kotlin JVM target
+        shell: bash
+        run: |
+          set -e
+
+          APP_GRADLE="$PROJECT_DIR/app/build.gradle.kts"
+
+          if [ ! -f "$APP_GRADLE" ]; then
+            echo "ERROR: app/build.gradle.kts not found"
+            exit 1
+          fi
+
+          echo "Fixing JVM targets in:"
+          echo "$APP_GRADLE"
+
+          python3 - "$APP_GRADLE" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+
+          if "compileOptions" not in text:
+              text = text.replace(
+                  "android {",
+                  """android {
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          """,
+                  1
+              )
+
+          elif "JavaVersion.VERSION_17" not in text:
+              text = text.replace(
+                  "android {",
+                  """android {
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+          """,
+                  1
+              )
+
+          if "kotlinOptions" not in text:
+              marker = "android {"
+              text = text.replace(
+                  marker,
+                  marker + """
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          """,
+                  1
+              )
+
+          path.write_text(text)
+
+          print("JVM target fix applied successfully.")
+          PY
+
+          echo "Final Android Gradle file:"
+          sed -n '1,180p' "$APP_GRADLE"
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          echo "Starting Pragati APK build..."
+
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+          echo "APK build completed."
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Pragati-debug-apk
-          path: project/app/build/outputs/apk/debug/app-debug.apk
+          name: Pragati-Android-APK
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
